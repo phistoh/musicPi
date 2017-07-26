@@ -27,12 +27,16 @@ def get_weather():
 	return current_temp, current_cond
 
 # generates three integers in [0,255] to use as color for dothat.backlight.rgb()
-# ensures that at least one integer is > 100
+# ensures that at least one integer is >= 100
 def get_rgb(str):
 	random.seed(str)
 	r = random.randrange(255)
 	g = random.randrange(255)
 	b = random.randrange(255)
+	while r < 100 and g < 100 and b < 100:
+		r = random.randrange(255)
+		g = random.randrange(255)
+		b = random.randrange(255)	
 	return r, g, b
 	
 # def alarm_check(schedule):
