@@ -8,6 +8,13 @@ import dothat.lcd as lcd
 import dothat.backlight as backlight
 from mpd import MPDClient
 
+# shortens long strings to max. 16 characters and surrounds (shorter) strings with spaces
+def center_str(str):
+	if len(str) > 16:
+		return str[0:13] + "..."
+	else:
+		return str.center(16)
+
 def get_artist_and_title():
 	songinfo = client.currentsong()
 	artist = songinfo['artist']
@@ -35,12 +42,6 @@ def get_time_and_date():
 	current_time = time.strftime("%H:%M")
 	current_date = time.strftime("%d-%m")
 	return current_time, current_date
-
-def get_weather():	
-	random.seed()
-	current_temp = str(random.randint(-30, 45))+"C"
-	current_cond = random.choice(["Sonne", "Wolken", "Regen", "Schnee", "Blitz", "Hagel", "Nebel"])
-	return current_temp, current_cond
 
 # generates three integers in [0,255] to use as color for dothat.backlight.rgb()
 # ensures that at least one integer is >= 100
@@ -87,7 +88,7 @@ def write_at_position(str, x, y):
 		lcd.write(str)
 	display_lock.release()
 
-# music in first line
+# music in first and second line
 def music_display():
 	global last_artist, last_song
 	while running:
@@ -97,34 +98,18 @@ def music_display():
 		if last_artist != current_artist or last_song != current_song:
 			last_artist, last_song = current_artist, current_song
 			
-			now_playing = current_artist + ' - ' + current_song
-			
-			if len(now_playing) > 16:
-				now_playing = now_playing[0:15]
-			
-			clear_display(0)
-			
-			write_at_position(now_playing, 0, 0)
-			
 			r, g, b = get_rgb(current_artist)
 			backlight.rgb(r,g,b)
 			
+			# makes sure both strings fit in one line
+			current_artist = center_str(current_artist)
+			current_song = center_str(current_song)
+			
+			write_at_position(current_artist, 0, 0)
+			write_at_position(current_song, 0, 1)
+			
 		# client.idle()
 		time.sleep(1)
-			
-# weather in second line
-def weather_display():
-	global last_temp, last_cond
-	while running:
-		current_temp, current_cond = get_weather()
-		if last_temp != current_temp or last_cond != current_cond:
-			last_temp, last_cond = current_temp, current_cond
-			clear_display(1)
-			
-			write_at_position(current_temp, 7-len(current_temp), 1)
-			write_at_position(current_cond, 9, 1)
-			
-			time.sleep(5)
 		
 # date and time in third line
 # also calls alarm_check()
@@ -149,8 +134,7 @@ def time_display():
 		
 # ============== GLOBVARS ==============
 last_time, last_date = "", ""
-last_temp, last_cond = "", ""
-last_artist, last_sond = "", ""
+last_artist, last_song = "", ""
 client = MPDClient()
 		
 # ============== MAIN ==============
@@ -166,10 +150,6 @@ try:
 	music_display_thread.setDaemon(True)
 	music_display_thread.start()
 	
-	weather_display_thread = threading.Thread(target=weather_display)
-	weather_display_thread.setDaemon(True)
-	weather_display_thread.start()
-	
 	time_display_thread = threading.Thread(target=time_display)
 	time_display_thread.setDaemon(True)
 	time_display_thread.start()
@@ -180,7 +160,6 @@ try:
 except KeyboardInterrupt:
 	running = False
 	music_display_thread.join()
-	weather_display_thread.join()
 	time_display_thread.join()
 	lcd.clear()
 	backlight.off()
