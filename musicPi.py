@@ -8,13 +8,21 @@ import dothat.lcd as lcd
 import dothat.backlight as backlight
 from mpd import MPDClient
 
-# shortens long strings to max. 16 characters and surrounds (shorter) strings with spaces
-def center_str(str):
-	if len(str) > 16:
-		return str[0:13] + "..."
+# shortens long strings to max. l characters and surrounds (shorter) strings with spaces
+def center_str(str, l=16):
+	if l < 3:
+		return l*'.'
+	if len(str) > l:
+		return str[0:l-3] + "..."
 	else:
-		return str.center(16)
+		return str.center(l,'-')
 
+# takes an integer s and returns a string "min:sec" with sec in [00, 59]
+def convert_seconds_to_minutes(s):
+	min, sec = divmod(s,60)
+	min, sec = str(min), str(sec).rjust(2,'0')
+	return ":".join((min, sec))
+		
 def get_artist_and_title():
 	songinfo = client.currentsong()
 	artist = songinfo['artist']
@@ -22,6 +30,7 @@ def get_artist_and_title():
 	
 	return artist, title
 
+# returns a percentage
 def get_progress():
 	statusinfo = client.status()
 	
@@ -37,12 +46,20 @@ def get_progress():
 		pct = round(elapsed/total, 2)
 	
 	return min(pct, 100)
-	
-def get_time_and_date():
-	current_time = time.strftime("%H:%M")
-	current_date = time.strftime("%d-%m")
-	return current_time, current_date
 
+# returns the time and duration of a song
+def get_time_and_duration():
+	statusinfo = client.status()
+	
+	if statusinfo['state'] == 'stop':
+		return ''
+	
+	elapsed, total = statusinfo['time'].split(':')
+	elapsed = convert_seconds_to_minutes(int(elapsed))
+	total = convert_seconds_to_minutes(int(total))
+	
+	return '{} / {}'.format(elapsed, total)
+	
 # generates three integers in [0,255] to use as color for dothat.backlight.rgb()
 # ensures that at least one integer is >= 100
 def get_rgb(str):
@@ -55,19 +72,6 @@ def get_rgb(str):
 		g = random.randrange(255)
 		b = random.randrange(255)	
 	return r, g, b
-	
-def alarm_check():
-	schedule = {'Monday': "09:42", 'Tuesday': "07:00", 'Wednesday': "07:00", 'Thursday': "07:00", 'Friday': "07:00", 'Saturday': "07:00", 'Sunday': "13:10"}
-	current_time = time.strftime("%H:%M")
-	current_weekday = time.strftime("%A")
-	
-	if schedule[current_weekday] == current_time:
-		alarm()
-		
-def alarm():
-	# TODO: load alarm playlist
-	client.shuffle()
-	client.play()
 
 # cleans either a single line or all lines on the display
 def clear_display(line=3):
@@ -88,52 +92,60 @@ def write_at_position(str, x, y):
 		lcd.write(str)
 	display_lock.release()
 
-# music in first and second line
+# writes the display in the following form:
+# +----------------+
+# |     Artist     |
+# |     Title      |
+# |  0:35 / 3:56   |
+# +----------------+
 def music_display():
 	global last_artist, last_song
 	while running:
 		current_artist, current_song = get_artist_and_title()
-		progress = get_progress()
-		backlight.set_graph(progress)
+		song_time = get_time_and_duration()
 		if last_artist != current_artist or last_song != current_song:
 			last_artist, last_song = current_artist, current_song
 			
-			r, g, b = get_rgb(current_artist)
-			backlight.rgb(r,g,b)
-			
-			# makes sure both strings fit in one line
 			current_artist = center_str(current_artist)
 			current_song = center_str(current_song)
 			
 			write_at_position(current_artist, 0, 0)
 			write_at_position(current_song, 0, 1)
+		
+		song_time = center_str(song_time)
+		write_at_position(song_time, 0, 2)
 			
-		# client.idle()
+		time.sleep(1)		
+
+# sets the display color depending on artist or status		
+def color_display():
+	global last_artist
+	while running:
+		current_artist, _ = get_artist_and_title()
+		current_state = client.status()['state']
+		# playing but with a different artist -> get associated color
+		if last_artist != current_artist and current_state == 'play':
+			last_artist = current_artist		
+			r, g, b = get_rgb(current_artist)
+			backlight.rgb(r,g,b)
+		# paused -> get "pause-color"
+		elif current_state == 'pause':
+			backlight.rgb(50,50,50)
+		# stopped -> turn color off
+		elif current_state == 'stop':
+			backlight.off()
+		
+		time.sleep(1)
+
+# sets the progress bar leds
+def progress_bar():
+	global last_artist
+	while running:
+		progress = get_progress()
+		backlight.set_graph(progress)			
 		time.sleep(1)
 		
-# date and time in third line
-# also calls alarm_check()
-def time_display():
-	global last_time, last_date
-	while running:
-		current_time, current_date = get_time_and_date()
-		
-		if current_time != last_time or current_date != last_date:
-			last_time, last_date = current_time, current_date
-			clear_display(2)
-			
-			if alarm_status:
-				write_at_position(".", 1, 2)
-				alarm_check()
-			else:
-				write_at_position(" ", 1, 2)
-			write_at_position(current_time, 2, 2)
-			write_at_position(current_date, 9, 2)
-
-		time.sleep(1)		
-		
 # ============== GLOBVARS ==============
-last_time, last_date = "", ""
 last_artist, last_song = "", ""
 client = MPDClient()
 		
@@ -142,7 +154,6 @@ try:
 	client.connect("localhost", 6600)
 
 	running = True
-	alarm_status = True
 	
 	display_lock = threading.Lock()
 	
@@ -150,9 +161,13 @@ try:
 	music_display_thread.setDaemon(True)
 	music_display_thread.start()
 	
-	time_display_thread = threading.Thread(target=time_display)
-	time_display_thread.setDaemon(True)
-	time_display_thread.start()
+	color_display_thread = threading.Thread(target=color_display)
+	color_display_thread.setDaemon(True)
+	color_display_thread.start()
+	
+	progress_bar_thread = threading.Thread(target=progress_bar)
+	progress_bar_thread.setDaemon(True)
+	progress_bar_thread.start()
 	
 	while True:
 		pass
@@ -160,7 +175,8 @@ try:
 except KeyboardInterrupt:
 	running = False
 	music_display_thread.join()
-	time_display_thread.join()
+	color_display_thread.join()
+	progress_bar_thread.join()
 	lcd.clear()
 	backlight.off()
 	client.stop()
