@@ -11,11 +11,11 @@ from mpd import MPDClient
 # shortens long strings to max. l characters and surrounds (shorter) strings with spaces
 def center_str(str, l=16):
 	if l < 3:
-		return l*'.'
+		return ''
 	if len(str) > l:
 		return str[0:l-3] + "..."
 	else:
-		return str.center(l,'-')
+		return str.center(l)
 
 # takes an integer s and returns a string "min:sec" with sec in [00, 59]
 def convert_seconds_to_minutes(s):
